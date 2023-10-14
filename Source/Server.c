@@ -8,6 +8,9 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <poll.h>
+
+#define MAX_CLIENTS 64
 
 static void setup_signal_handler(void);
 static void sigint_handler(int signum);
@@ -18,6 +21,8 @@ static int socket_accept_connection(int server_fd, struct sockaddr_storage *clie
 static void handle_file(int client_sockfd, const char *directory);
 static void socket_close(int sockfd);
 static void receive_and_store_files(int client_sockfd, const char *directory);
+static int setup_poll(struct pollfd *fds, int server_fd);
+static void handle_client_activity(struct pollfd *fds, int nfds, const char *directory);
 
 #define SOCKET_PATH "/tmp/ServerSocket"
 
@@ -37,22 +42,51 @@ int main(int argc, char *argv[]) {
     start_listening(sockfd, SOMAXCONN);
     setup_signal_handler();
 
+    struct pollfd fds[MAX_CLIENTS + 1];
+    fds[0].fd = sockfd;
+    fds[0].events = POLLIN;
+
+    int num_clients = 1;  
+
     while (!exit_flag) {
-        int client_sockfd;
-        struct sockaddr_storage client_addr;
-        socklen_t client_addr_len = sizeof(client_addr);
+        int num_events = poll(fds, num_clients, -1);  
 
-        client_sockfd = socket_accept_connection(sockfd, &client_addr, &client_addr_len);
-
-        if (client_sockfd == -1) {
-            if (exit_flag) {
-                break;
+        if (num_events == -1) {
+            if (errno == EINTR) {
+                continue;  
+            } else {
+                perror("poll");
+                exit(EXIT_FAILURE);
             }
-            continue;
         }
 
-        receive_and_store_files(client_sockfd, directory);
-        socket_close(client_sockfd);
+        if (fds[0].revents & POLLIN) {
+            int client_sockfd;
+            struct sockaddr_storage client_addr;
+            socklen_t client_addr_len = sizeof(client_addr);
+
+            client_sockfd = socket_accept_connection(sockfd, &client_addr, &client_addr_len);
+
+            if (client_sockfd != -1) {
+                if (num_clients < MAX_CLIENTS) {
+                    fds[num_clients].fd = client_sockfd;
+                    fds[num_clients].events = POLLIN;
+                    num_clients++;
+                    printf("New client connected: %d\n", client_sockfd);
+                } else {
+
+                    close(client_sockfd);
+                }
+            }
+        }
+
+
+        handle_client_activity(fds, num_clients, directory);
+    }
+
+
+    for (int i = 1; i < num_clients; i++) {
+        close(fds[i].fd);
     }
 
     socket_close(sockfd);
@@ -60,6 +94,7 @@ int main(int argc, char *argv[]) {
 
     return EXIT_SUCCESS;
 }
+
 
 static void setup_signal_handler(void) {
     struct sigaction sa;
@@ -166,7 +201,7 @@ static void receive_and_store_files(int client_sockfd, const char *directory) {
         name = strtok(filename, ".");
         extension = strtok(NULL, ".");
 
-        // Check for duplicate files and append
+
         int file_suffix = 0;
         while (1) {
             
@@ -211,6 +246,34 @@ static void receive_and_store_files(int client_sockfd, const char *directory) {
             printf("Received file: %s (duplicate #%d)\n", file_path, file_suffix);
         } else {
             printf("Received file: %s\n", file_path);
+        }
+    }
+}
+
+static int setup_poll(struct pollfd *fds, int server_fd) {
+
+    fds[0].fd = server_fd;
+    fds[0].events = POLLIN;
+
+    return 1; 
+}
+
+static void handle_client_activity(struct pollfd *fds, int num_clients, const char *directory) {
+    for (int i = 1; i < num_clients; i++) {
+        if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) {
+            if (fds[i].revents & POLLIN) {
+
+                receive_and_store_files(fds[i].fd, directory);
+            }
+
+
+            printf("Client disconnected: %d\n", fds[i].fd);
+            close(fds[i].fd);
+            for (int j = i; j < num_clients - 1; j++) {
+                fds[j] = fds[j + 1];
+            }
+            num_clients--;
+            i--;  
         }
     }
 }
