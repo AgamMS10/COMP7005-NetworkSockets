@@ -10,8 +10,6 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define MAX_CLIENTS 64
-
 static void setup_signal_handler(void);
 static void sigint_handler(int signum);
 static int socket_create(void);
@@ -30,7 +28,7 @@ static volatile sig_atomic_t exit_flag = 0;
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        fprintf(stderr, "Please Specify a directory to save files to \nUsage: %s <directory_path>\n", argv[0]);
+        fprintf(stderr, "Please Specify a directory to save files to\nUsage: %s <directory_path>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -42,18 +40,23 @@ int main(int argc, char *argv[]) {
     start_listening(sockfd, SOMAXCONN);
     setup_signal_handler();
 
-    struct pollfd fds[MAX_CLIENTS + 1];
+    struct pollfd *fds = (struct pollfd *)malloc(sizeof(struct pollfd) * 64);
+    if (fds == NULL) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
     fds[0].fd = sockfd;
     fds[0].events = POLLIN;
 
-    int num_clients = 1;  
+    int num_clients = 1;
 
     while (!exit_flag) {
-        int num_events = poll(fds, num_clients, -1);  
+        int num_events = poll(fds, num_clients, -1);
 
         if (num_events == -1) {
             if (errno == EINTR) {
-                continue;  
+                continue;
             } else {
                 perror("poll");
                 exit(EXIT_FAILURE);
@@ -68,15 +71,18 @@ int main(int argc, char *argv[]) {
             client_sockfd = socket_accept_connection(sockfd, &client_addr, &client_addr_len);
 
             if (client_sockfd != -1) {
-                if (num_clients < MAX_CLIENTS) {
-                    fds[num_clients].fd = client_sockfd;
-                    fds[num_clients].events = POLLIN;
-                    num_clients++;
-                    printf("New client connected: %d\n", client_sockfd);
-                } else {
-
-                    close(client_sockfd);
+                if (num_clients >= 64) { 
+                    fds = (struct pollfd *)realloc(fds, sizeof(struct pollfd) * (num_clients * 2)); 
+                    if (fds == NULL) {
+                        perror("realloc");
+                        exit(EXIT_FAILURE);
+                    }
                 }
+
+                fds[num_clients].fd = client_sockfd;
+                fds[num_clients].events = POLLIN;
+                num_clients++;
+                printf("New client connected: %d\n", client_sockfd);
             }
         }
 
@@ -92,9 +98,9 @@ int main(int argc, char *argv[]) {
     socket_close(sockfd);
     unlink(SOCKET_PATH);
 
+    free(fds); 
     return EXIT_SUCCESS;
 }
-
 
 static void setup_signal_handler(void) {
     struct sigaction sa;
