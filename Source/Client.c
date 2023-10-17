@@ -6,12 +6,11 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-
-
-#define SOCKET_PATH "/tmp/ServerSocket"
+#define SERVER_IP "192.168.1.116"
+#define SERVER_PORT 9090
 
 static int socket_create(void);
-static int connect_to_server(const char *path);
+static int connect_to_server(const char *server_ip, int server_port);
 static void socket_close(int sockfd);
 static void read_file(const char *file_path, char **file_data, size_t *file_size);
 static void send_file_data(int server_fd, const char *filename, const char *file_data, size_t file_size);
@@ -24,7 +23,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    int sockfd = connect_to_server(SOCKET_PATH);
+    int sockfd = connect_to_server(SERVER_IP, SERVER_PORT);
 
     for (int i = 1; i < argc; i++) {
         char *file_data;
@@ -116,16 +115,7 @@ static char *parse_filename(const char *file_path) {
 }
 
 static int socket_create(void) {
-    int sockfd;
-
-#ifdef SOCK_CLOEXEC
-    sockfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-#else
-    sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sockfd != -1 ) {
-        printf("Socket created sucessfully:%d\n", sockfd);
-    }
-#endif
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd == -1) {
         perror("Socket creation failed");
@@ -135,27 +125,24 @@ static int socket_create(void) {
     return sockfd;
 }
 
-static int connect_to_server(const char *path) {
+static int connect_to_server(const char *server_ip, int server_port) {
     int sockfd = socket_create();
-    struct sockaddr_un server_addr;
+    struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, path, sizeof(server_addr.sun_path) - 1);
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(server_port);
 
-    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-        perror("Connect failed Make sure Server is running and Socket address is correct");
+    if (inet_pton(AF_INET, server_ip, &(server_addr.sin_addr)) <= 0) {
+        perror("Invalid server IP address");
         exit(EXIT_FAILURE);
     }
-    else {
-        printf("Connected to server %d\n", sockfd);
+
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr) == -1)) {
+        perror("Connect failed. Make sure the server is running and the socket address is correct.");
+        exit(EXIT_FAILURE);
+    } else {
+        printf("Connected to server %s:%d\n", server_ip, server_port);
     }
 
     return sockfd;
-}
-
-static void socket_close(int sockfd) {
-    if (close(sockfd) == -1) {
-        perror("Error closing socket");
-        exit(EXIT_FAILURE);
-    }
 }
