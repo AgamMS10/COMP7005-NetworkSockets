@@ -21,7 +21,8 @@ static void receive_and_store_files(int client_sockfd, const char *directory);
 static int setup_poll(struct pollfd *fds, int server_fd);
 static void handle_client_activity(struct pollfd *fds, int nfds, const char *directory);
 
-#define SOCKET_PORT 9090 
+#define SOCKET_PORT 9090
+
 
 static volatile sig_atomic_t exit_flag = 0;
 
@@ -32,10 +33,19 @@ int main(int argc, char *argv[]) {
     }
 
     const char *directory = argv[1];
-    unlink(SOCKET_PORT);
+
+    char port_str[65535];
+    printf("Enter the port number: ");
+    if (fgets(port_str, sizeof(port_str), stdin) == NULL) {
+        perror("fgets");
+        exit(EXIT_FAILURE);
+    }
+
+    unlink(port_str);
+    int port = atoi(port_str); 
 
     int sockfd = socket_create();
-    socket_bind(sockfd, SOCKET_PORT);
+    socket_bind(sockfd, port);
     start_listening(sockfd, SOMAXCONN);
     setup_signal_handler();
 
@@ -95,8 +105,8 @@ int main(int argc, char *argv[]) {
     }
 
     socket_close(sockfd);
-    unlink(SOCKET_PORT);
-
+    unlink(port_str);
+    
     free(fds); 
     return EXIT_SUCCESS;
 }
@@ -123,20 +133,13 @@ static void sigint_handler(int signum) {
 }
 
 static int socket_create(void) {
-    int sockfd;
-
-#ifdef SOCK_CLOEXEC
-    sockfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-#else
-    sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-#endif
-    if (sockfd != -1 ) {
-        printf("Socket created sucessfully: %d\n", sockfd);
-    }
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
     }
+    
+    printf("Socket created successfully: %d\n", sockfd);
 
     return sockfd;
 }
