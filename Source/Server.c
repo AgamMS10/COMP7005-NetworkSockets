@@ -13,16 +13,15 @@
 static void setup_signal_handler(void);
 static void sigint_handler(int signum);
 static int socket_create(void);
-static void socket_bind(int sockfd, const char *path);
+static void socket_bind(int sockfd, int port);
 static void start_listening(int server_fd, int backlog);
 static int socket_accept_connection(int server_fd, struct sockaddr_storage *client_addr, socklen_t *client_addr_len);
-static void handle_file(int client_sockfd, const char *directory);
 static void socket_close(int sockfd);
 static void receive_and_store_files(int client_sockfd, const char *directory);
 static int setup_poll(struct pollfd *fds, int server_fd);
 static void handle_client_activity(struct pollfd *fds, int nfds, const char *directory);
 
-#define SOCKET_PATH "/tmp/ServerSocket"
+#define SOCKET_PORT 9090 
 
 static volatile sig_atomic_t exit_flag = 0;
 
@@ -33,10 +32,10 @@ int main(int argc, char *argv[]) {
     }
 
     const char *directory = argv[1];
-    unlink(SOCKET_PATH);
+    unlink(SOCKET_PORT);
 
     int sockfd = socket_create();
-    socket_bind(sockfd, SOCKET_PATH);
+    socket_bind(sockfd, SOCKET_PORT);
     start_listening(sockfd, SOMAXCONN);
     setup_signal_handler();
 
@@ -96,7 +95,7 @@ int main(int argc, char *argv[]) {
     }
 
     socket_close(sockfd);
-    unlink(SOCKET_PATH);
+    unlink(SOCKET_PORT);
 
     free(fds); 
     return EXIT_SUCCESS;
@@ -142,20 +141,20 @@ static int socket_create(void) {
     return sockfd;
 }
 
-static void socket_bind(int sockfd, const char *path) {
-    struct sockaddr_un addr;
+static void socket_bind(int sockfd, int port) {
+    struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
 
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-    addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
 
-    printf("Bound to domain socket: %s\n", path);
+    printf("Bound to port: %d\n", port);
 }
 
 static void start_listening(int server_fd, int backlog) {
