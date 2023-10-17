@@ -6,7 +6,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#define SERVER_IP "198.168.1.116"
+#define SERVER_IP "192.168.1.208"
 #define SERVER_PORT 9090
 
 static int socket_create(void);
@@ -111,8 +111,14 @@ static char *parse_filename(const char *file_path) {
     while (filename > file_path && (*(filename - 1) != '/')) {
         filename--;
     }
-    
-    return strdup(filename);
+
+    size_t len = strlen(filename);
+    char *result = (char *)malloc(len + 1);
+    if (result != NULL) {
+        memcpy(result, filename, len);
+        result[len] = '\0'; // Null-terminate the string.
+    }
+    return result;
 }
 
 static int socket_create(void) {
