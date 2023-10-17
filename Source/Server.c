@@ -21,8 +21,6 @@ static void receive_and_store_files(int client_sockfd, const char *directory);
 static int setup_poll(struct pollfd *fds, int server_fd);
 static void handle_client_activity(struct pollfd *fds, int nfds, const char *directory);
 
-#define SOCKET_PORT 9090
-
 
 static volatile sig_atomic_t exit_flag = 0;
 
@@ -270,10 +268,8 @@ static void handle_client_activity(struct pollfd *fds, int num_clients, const ch
     for (int i = 1; i < num_clients; i++) {
         if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) {
             if (fds[i].revents & POLLIN) {
-
                 receive_and_store_files(fds[i].fd, directory);
             }
-
 
             printf("Client disconnected: %d\n", fds[i].fd);
             close(fds[i].fd);
@@ -281,7 +277,10 @@ static void handle_client_activity(struct pollfd *fds, int num_clients, const ch
                 fds[j] = fds[j + 1];
             }
             num_clients--;
-            i--;  
+
+            i--;
+
+            break;
         }
     }
 }
