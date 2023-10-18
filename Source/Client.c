@@ -6,8 +6,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#define SERVER_IP "192.168.1.208"
-#define SERVER_PORT 9090
+#define MAX_IP_LENGTH 16
+#define MAX_PORT_LENGTH 6
 
 static int socket_create(void);
 static int connect_to_server(const char *ip, int port);
@@ -17,15 +17,18 @@ static void send_file_data(int server_fd, const char *filename, const char *file
 static char *parse_filename(const char *file_path);
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Please specify the files to send to the server.\n");
-        fprintf(stderr, "Usage: %s <file1> [<file2> ...]\n", argv[0]);
+    if (argc < 4) {
+        printf("Usage: %s <IPv4> <port> <file1> [<file2> ...]\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    int sockfd = connect_to_server(SERVER_IP, SERVER_PORT);
+    
+    const char *server_ip = argv[1];
+    int server_port = atoi(argv[2]);
 
-    for (int i = 1; i < argc; i++) {
+    int sockfd = connect_to_server(server_ip, server_port);
+
+    for (int i = 3; i < argc; i++) {
         char *file_data;
         size_t file_size;
         read_file(argv[i], &file_data, &file_size);
@@ -116,7 +119,7 @@ static char *parse_filename(const char *file_path) {
     char *result = (char *)malloc(len + 1);
     if (result != NULL) {
         memcpy(result, filename, len);
-        result[len] = '\0'; // Null-terminate the string.
+        result[len] = '\0';
     }
     return result;
 }
