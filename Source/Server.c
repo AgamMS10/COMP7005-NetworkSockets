@@ -7,7 +7,6 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <ifaddrs.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <poll.h>
@@ -15,7 +14,7 @@
 static void setup_signal_handler(void);
 static void sigint_handler(int signum);
 static int socket_create(void);
-static void socket_bind(int sockfd, int port);
+static void socket_bind(int sockfd, int port, const char *ip_addr);
 static void start_listening(int server_fd, int backlog);
 static int socket_accept_connection(int server_fd, struct sockaddr_storage *client_addr, socklen_t *client_addr_len);
 static void socket_close(int sockfd);
@@ -27,25 +26,21 @@ static void handle_client_activity(struct pollfd *fds, int nfds, const char *dir
 static volatile sig_atomic_t exit_flag = 0;
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Please Specify a directory to save files to\nUsage: %s <directory_path>\n", argv[0]);
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <IPv4Addr> <PortNumber> ./Directory/to/store/files\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    const char *directory = argv[1];
-
-    char port_str[65535];
-    printf("Enter the port number: ");
-    if (fgets(port_str, sizeof(port_str), stdin) == NULL) {
-        perror("fgets");
-        exit(EXIT_FAILURE);
-    }
+    const char *ip_addr = argv[1];
+    char *port_str = argv[2];
+    const char *directory = argv[3];
 
     unlink(port_str);
-    int port = atoi(port_str); 
 
+
+    int port = atoi(port_str); 
     int sockfd = socket_create();
-    socket_bind(sockfd, port);
+    socket_bind(sockfd, port, ip_addr);
     start_listening(sockfd, SOMAXCONN);
     setup_signal_handler();
 
@@ -144,37 +139,24 @@ static int socket_create(void) {
     return sockfd;
 }
 
-static void socket_bind(int sockfd, int port) {
+static void socket_bind(int sockfd, int port, const char *ip_addr) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (inet_pton(AF_INET, ip_addr, &addr.sin_addr) <= 0) {
+    perror("inet_pton");
+    exit(EXIT_FAILURE);
+    }
 
     if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
-    
-    struct ifaddrs *ifap, *ifa;
-    if (getifaddrs(&ifap) == -1) {
-        perror("getifaddrs");
-        exit(EXIT_FAILURE);
-    }
-        printf("Bound to Port: %d\n", port);
-    printf("IP Addresses of Interfaces:\n");
 
-    for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr != NULL && ifa->ifa_addr->sa_family == AF_INET) {
-            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
-            char ip[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &(addr->sin_addr), ip, INET_ADDRSTRLEN);
-            printf("%s: %s\n", ifa->ifa_name, ip);
-        }
-    }
-
-    freeifaddrs(ifap);
+    printf("Bound to IP: %s, Port: %d\n", ip_addr, port);
 }
 
 static void start_listening(int server_fd, int backlog) {
