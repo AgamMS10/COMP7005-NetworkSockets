@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <poll.h>
@@ -154,8 +156,25 @@ static void socket_bind(int sockfd, int port) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
+    
+    struct ifaddrs *ifap, *ifa;
+    if (getifaddrs(&ifap) == -1) {
+        perror("getifaddrs");
+        exit(EXIT_FAILURE);
+    }
+        printf("Bound to Port: %d\n", port);
+    printf("IP Addresses of Interfaces:\n");
 
-    printf("Bound to port: %d\n", port);
+    for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr != NULL && ifa->ifa_addr->sa_family == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+            char ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &(addr->sin_addr), ip, INET_ADDRSTRLEN);
+            printf("%s: %s\n", ifa->ifa_name, ip);
+        }
+    }
+
+    freeifaddrs(ifap);
 }
 
 static void start_listening(int server_fd, int backlog) {
