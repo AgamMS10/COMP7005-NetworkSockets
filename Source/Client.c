@@ -20,12 +20,14 @@ static char *parse_filename(const char *file_path);
 static int determine_address_family(const char *ip);
 
 int main(int argc, char *argv[]) {
+    printf("Starting Client\n");
     if (argc < 4) {
         printf("Usage: %s <IPv4/IPv6> <port> <file1> [<file2> ...]\n", argv[0]);
         exit(EXIT_FAILURE);
     }
     const char *server_ip = argv[1];
     int server_port = atoi(argv[2]);
+    printf("Going to connect_to_server\n");
     int sockfd = connect_to_server(server_ip, server_port);
 
     for (int i = 3; i < argc; i++) {
@@ -46,10 +48,14 @@ int main(int argc, char *argv[]) {
 }
 
 static int socket_create(int family) {
+    printf("In Create Socket\n");
     int sockfd = socket(family, SOCK_STREAM, 0);
     if (sockfd == -1) {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
+    }
+    else{
+        printf("Socket Created \n");
     }
     return sockfd;
 }
@@ -134,13 +140,16 @@ static char *parse_filename(const char *file_path) {
 }
 
 static int connect_to_server(const char *ip, int port) {
+    printf("In connect_to_server\n");
+    printf("Going to determine_address_family\n");
     int family = determine_address_family(ip);
     if (family == -1) {
         fprintf(stderr, "Invalid IP address format.\n");
         exit(EXIT_FAILURE);
     }
-
+    printf("Going to socket_create\n");
     int sockfd = socket_create(family);
+    printf("Back in connect_to_server\n");
 
     if (family == AF_INET) {
         struct sockaddr_in server_addr;
