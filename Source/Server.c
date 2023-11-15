@@ -203,30 +203,37 @@ static void receive_and_store_files(int client_sockfd, const char *directory) {
         recv(client_sockfd, filename, filename_size, 0);
         filename[filename_size] = '\0';
 
-        
         char *name, *extension;
         name = strtok(filename, ".");
-        extension = strtok(NULL, ".");
-
+        extension = strtok(NULL, ".") ? : ""; // Handle files without an extension
 
         int file_suffix = 0;
-        while (1) {
-            
-            if (file_suffix > 0) {
-                snprintf(file_path, sizeof(file_path), "%s/%s#%d.%s", directory, name, file_suffix, extension);
-            } else {
-                snprintf(file_path, sizeof(file_path), "%s/%s.%s", directory, name, extension);
+        int need_suffix = 0; // Flag to check if suffix is needed
+
+        // Check if the filename already exists to determine if a suffix is needed
+        snprintf(file_path, sizeof(file_path), "%s/%s.%s", directory, name, extension);
+        if (access(file_path, F_OK) == 0) { // File exists
+            need_suffix = 1; // Set flag to start suffixing
+        }
+
+        while (need_suffix) {
+            // Check if the combined name, suffix, and directory will exceed file_path's size
+            int written = snprintf(file_path, sizeof(file_path), "%s/%s#%d.%s", directory, name, file_suffix, extension);
+            if (written >= sizeof(file_path)) {
+                fprintf(stderr, "Error: filename with directory and suffix is too long\n");
+                return; // Error: Path is too long after adding suffix
             }
 
             if (access(file_path, F_OK) != 0) {
-                break;
+                break; // File doesn't exist, we can create it with this name
             }
 
-            file_suffix++;
+            file_suffix++; // Increment suffix and check again
         }
 
         uint32_t file_size;
         recv(client_sockfd, &file_size, sizeof(uint32_t), 0);
+        file_size = ntohl(file_size); // Convert to host byte order
 
         FILE *file = fopen(file_path, "wb");
         if (file == NULL) {
@@ -250,12 +257,13 @@ static void receive_and_store_files(int client_sockfd, const char *directory) {
 
         fclose(file);
         if (file_suffix > 0) {
-            printf("Received file: %s (duplicate #%d)\n", file_path, file_suffix);
+            printf("Received and stored file with suffix: %s (duplicate #%d)\n", file_path, file_suffix);
         } else {
-            printf("Received file: %s\n", file_path);
+            printf("Received and stored file: %s\n", file_path);
         }
     }
 }
+
 
 static int setup_poll(struct pollfd *fds, int server_fd) {
 
