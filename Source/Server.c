@@ -18,7 +18,10 @@ static void socket_bind(int sockfd, int port, const char *ip_addr);
 static void start_listening(int server_fd, int backlog);
 static int socket_accept_connection(int server_fd, struct sockaddr_storage *client_addr, socklen_t *client_addr_len);
 static void socket_close(int sockfd);
-static void receive_and_store_files(int client_sockfd, const char *directory);
+static void receive_file_metadata(int client_sockfd, uint8_t *filename_size, uint32_t *file_size);
+static void receive_file_name(int client_sockfd, uint8_t filename_size, char *filename);
+static void receive_file_content(int client_sockfd, FILE *file, uint32_t file_size);
+static void save_location(const char *directory, const char *filename, char *file_path);
 static int setup_poll(struct pollfd *fds, int server_fd);
 static void handle_client_activity(struct pollfd *fds, int nfds, const char *directory);
 
@@ -195,74 +198,65 @@ static void socket_close(int sockfd) {
     }
 }
 
-static void receive_and_store_files(int client_sockfd, const char *directory) {
-    uint8_t filename_size;
-    while (recv(client_sockfd, &filename_size, sizeof(uint8_t), 0) > 0) {
-        char filename[256];
-        char file_path[512];
-        recv(client_sockfd, filename, filename_size, 0);
-        filename[filename_size] = '\0';
+static void receive_file_metadata(int client_sockfd, uint8_t *filename_size, uint32_t *file_size) {
+    recv(client_sockfd, filename_size, sizeof(uint8_t), 0);
+    recv(client_sockfd, file_size, sizeof(uint32_t), 0);
+    *file_size = ntohl(*file_size); // Convert to host byte order
+}
 
-        char *name, *extension;
-        name = strtok(filename, ".");
-        extension = strtok(NULL, ".") ? : ""; // Handle files without an extension
+static void receive_file_name(int client_sockfd, uint8_t filename_size, char *filename) {
+    recv(client_sockfd, filename, filename_size, 0);
+    filename[filename_size] = '\0';
+}
 
-        int file_suffix = 0;
-        int need_suffix = 0; // Flag to check if suffix is needed
-
-        // Check if the filename already exists to determine if a suffix is needed
-        snprintf(file_path, sizeof(file_path), "%s/%s.%s", directory, name, extension);
-        if (access(file_path, F_OK) == 0) { // File exists
-            need_suffix = 1; // Set flag to start suffixing
-        }
-
-        while (need_suffix) {
-            // Check if the combined name, suffix, and directory will exceed file_path's size
-            int written = snprintf(file_path, sizeof(file_path), "%s/%s#%d.%s", directory, name, file_suffix, extension);
-            if (written >= sizeof(file_path)) {
-                fprintf(stderr, "Error: filename with directory and suffix is too long\n");
-                return; // Error: Path is too long after adding suffix
-            }
-
-            if (access(file_path, F_OK) != 0) {
-                break; // File doesn't exist, we can create it with this name
-            }
-
-            file_suffix++; // Increment suffix and check again
-        }
-
-        uint32_t file_size;
-        recv(client_sockfd, &file_size, sizeof(uint32_t), 0);
-        file_size = ntohl(file_size); // Convert to host byte order
-
-        FILE *file = fopen(file_path, "wb");
-        if (file == NULL) {
-            perror("Error opening file for writing");
+static void receive_file_content(int client_sockfd, FILE *file, uint32_t file_size) {
+    char buffer[1024];
+    size_t remaining = file_size;
+    while (remaining > 0) {
+        size_t to_read = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        ssize_t bytes_received = recv(client_sockfd, buffer, to_read, 0);
+        if (bytes_received <= 0) {
+            perror("Error receiving file data");
+            fclose(file);
             return;
         }
-
-        char buffer[1024];
-        size_t remaining = file_size;
-        while (remaining > 0) {
-            size_t to_read = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
-            ssize_t bytes_received = recv(client_sockfd, buffer, to_read, 0);
-            if (bytes_received <= 0) {
-                perror("Error receiving file data");
-                fclose(file);
-                return;
-            }
-            fwrite(buffer, 1, bytes_received, file);
-            remaining -= bytes_received;
-        }
-
-        fclose(file);
-        if (file_suffix > 0) {
-            printf("Received and stored file with suffix: %s (duplicate #%d)\n", file_path, file_suffix);
-        } else {
-            printf("Received and stored file: %s\n", file_path);
-        }
+        fwrite(buffer, 1, bytes_received, file);
+        remaining -= bytes_received;
     }
 }
+
+static void save_location(const char *directory, const char *filename_const, char *file_path) {
+    char filename[256]; // Assuming filename size to be 256 as in receive_file_name
+    strncpy(filename, filename_const, sizeof(filename));
+    filename[sizeof(filename) - 1] = '\0'; // Ensure null termination
+
+    char *name, *extension;
+    name = strtok(filename, ".");
+    extension = strtok(NULL, ".") ? : ""; // Handle files without an extension
+
+    int file_suffix = 0;
+    int need_suffix = 0; // Flag to check if suffix is needed
+
+    snprintf(file_path, 512, "%s/%s.%s", directory, name, extension);
+    if (access(file_path, F_OK) == 0) { // File exists
+        need_suffix = 1; // Set flag to start suffixing
+    }
+
+    while (need_suffix) {
+        int written = snprintf(file_path, 512, "%s/%s#%d.%s", directory, name, file_suffix, extension);
+        if (written >= 512) {
+            fprintf(stderr, "Error: filename with directory and suffix is too long\n");
+            return; // Error: Path is too long after adding suffix
+        }
+
+        if (access(file_path, F_OK) != 0) {
+            break; // File doesn't exist, we can create it with this name
+        }
+
+        file_suffix++; // Increment suffix and check again
+    }
+}
+
 
 
 static int setup_poll(struct pollfd *fds, int server_fd) {
@@ -277,7 +271,25 @@ static void handle_client_activity(struct pollfd *fds, int num_clients, const ch
     for (int i = 1; i < num_clients; i++) {
         if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) {
             if (fds[i].revents & POLLIN) {
-                receive_and_store_files(fds[i].fd, directory);
+                uint8_t filename_size;
+                uint32_t file_size;
+                char filename[256];
+                char file_path[512];
+
+                receive_file_metadata(fds[i].fd, &filename_size, &file_size);
+                receive_file_name(fds[i].fd, filename_size, filename);
+                save_location(directory, filename, file_path);
+
+                FILE *file = fopen(file_path, "wb");
+                if (file == NULL) {
+                    perror("Error opening file for writing");
+                    continue;
+                }
+
+                receive_file_content(fds[i].fd, file, file_size);
+                fclose(file);
+
+                printf("Received and stored file: %s\n", file_path);
             }
 
             printf("Client disconnected: %d\n", fds[i].fd);
@@ -286,10 +298,7 @@ static void handle_client_activity(struct pollfd *fds, int num_clients, const ch
                 fds[j] = fds[j + 1];
             }
             num_clients--;
-
             i--;
-
-            break;
         }
     }
 }
